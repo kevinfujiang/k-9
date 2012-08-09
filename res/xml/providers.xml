@@ -84,7 +84,24 @@
     -->
 
 <providers>
-
+    <!-- NetEase Variants -->
+    <provider id="163" label="163 Mail" domain="163.com">
+        <incoming uri="imap+ssl://imap.163.com" username="$email"/>
+        <outgoing uri="smtp+ssl://smtp.163.com" username="$email"/>
+    </provider>
+    <provider id="126" label="126 Mail" domain="126.com">
+        <incoming uri="imap+ssl://imap.126.com" username="$email"/>
+        <outgoing uri="smtp+ssl://smtp.126.com" username="$email"/>
+    </provider>
+    <provider id="yeah" label="Yeah Mail" domain="yeah.net">
+        <incoming uri="imap+ssl://imap.yeah.net" username="$email"/>
+        <outgoing uri="smtp+ssl://smtp.yeah.net" username="$email"/>
+    </provider>
+     <provider id="188" label="188 Mail" domain="188.com">
+        <incoming uri="imap+ssl://imap.188.com" username="$email"/>
+        <outgoing uri="smtp+ssl://smtp.188.com" username="$email"/>
+    </provider>
+    
     <!-- Gmail variants -->
     <provider id="gmail" label="Gmail" domain="gmail.com">
         <incoming uri="imap+ssl+://imap.gmail.com" username="$email" />
@@ -126,6 +143,7 @@
         <incoming uri="pop3+ssl+://pop.east.cox.net" username="$user" />
         <outgoing uri="smtp+ssl+://smtp.east.cox.net" username="$user" />
     </provider> 
+
     <provider id="dotmac" label=".Mac" domain="mac.com">
         <incoming uri="imap+tls//mail.mac.com" username="$email" />
         <outgoing uri="smtp+tls://smtp.mac.com" username="$email" />

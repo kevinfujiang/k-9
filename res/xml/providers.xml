@@ -170,19 +170,27 @@
         <incoming uri="pop3://incoming.verizon.net" username="$user" />
         <outgoing uri="smtp://outgoing.verizon.net" username="$user" />
     </provider>
+    <provider id="montclair.edu" label="MSU" domain="montclair.edu">
+        <incoming uri="imap+ssl+://mail.montclair.edu" username="$user" />
+        <outgoing uri="smtp+tls+://smtp.montclair.edu" username="$user" />
+    </provider>
+    <provider id="gmx.com" label="GMX" domain="gmx.com">
+        <incoming uri="imap+ssl+://imap.gmx.com" username="$email" />
+        <outgoing uri="smtp+ssl+://mail.gmx.com" username="$email" />
+    </provider>
 
     <!-- Yahoo! Mail Variants -->
     <provider id="yahoo" label="Yahoo" domain="yahoo.com">
-        <incoming uri="imap+tls://imap.mail.yahoo.com" username="$user" />
-        <outgoing uri="smtp+tls://smtp.mobile.mail.yahoo.com" username="$user" />
+        <incoming uri="imap+ssl+://imap.mail.yahoo.com" username="$email" />
+        <outgoing uri="smtp+ssl+://smtp.mail.yahoo.com" username="$email" />
     </provider>
     <provider id="ymail" label="YMail" domain="ymail.com">
-        <incoming uri="imap+tls://imap.mail.yahoo.com" username="$email" />
-        <outgoing uri="smtp+tls://smtp.mobile.mail.yahoo.com" username="$email" />
+        <incoming uri="imap+ssl+://imap.mail.yahoo.com" username="$email" />
+        <outgoing uri="smtp+ssl+://smtp.mail.yahoo.com" username="$email" />
     </provider>
     <provider id="rocketmail" label="Rocketmail" domain="rocketmail.com">
-        <incoming uri="imap+tls://imap.mail.yahoo.com" username="$email" />
-        <outgoing uri="smtp+tls://smtp.mobile.mail.yahoo.com" username="$email" />
+        <incoming uri="imap+ssl+://imap.mail.yahoo.com" username="$email" />
+        <outgoing uri="smtp+ssl+://smtp.mail.yahoo.com" username="$email" />
     </provider>
 
 
@@ -274,6 +282,11 @@
               note="@string/provider_note_yahoojp">
         <incoming uri="pop3+ssl+://pop.mail.yahoo.co.jp"  username="$user" />
         <outgoing uri="smtp://smtp.mail.yahoo.co.jp:587" username="$user" />
+    </provider>
+    <provider id="auone" label="au one" domain="auone.jp"
+              note="@string/provider_note_auonejp">
+        <incoming uri="imap+ssl+://imap.gmail.com" username="$email" />
+        <outgoing uri="smtp+ssl+://smtp.gmail.com" username="$email" />
     </provider>
 
    <!-- Korean -->

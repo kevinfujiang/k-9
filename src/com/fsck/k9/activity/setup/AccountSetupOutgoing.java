@@ -53,7 +53,7 @@ public class AccountSetupOutgoing extends K9Activity implements OnClickListener,
         SmtpTransport.AUTH_PLAIN,
         SmtpTransport.AUTH_CRAM_MD5,
     };
-    
+
     private EditText mUsernameView;
     private EditText mPasswordView;
     private EditText mServerView;
@@ -285,7 +285,6 @@ public class AccountSetupOutgoing extends K9Activity implements OnClickListener,
         }
     }
 
-    @Override
     protected void onNext() {
         int securityType = (Integer)((SpinnerOption)mSecurityTypeView.getSelectedItem()).value;
         URI uri;

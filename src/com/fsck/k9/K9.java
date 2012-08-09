@@ -2,9 +2,9 @@
 package com.fsck.k9;
 
 import java.io.File;
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.SynchronousQueue;
@@ -23,9 +23,9 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.format.Time;
-import android.text.style.AbsoluteSizeSpan;
 import android.util.Log;
 
+import com.fsck.k9.Account.SortType;
 import com.fsck.k9.activity.MessageCompose;
 import com.fsck.k9.controller.MessagingController;
 import com.fsck.k9.controller.MessagingListener;
@@ -33,12 +33,16 @@ import com.fsck.k9.mail.Address;
 import com.fsck.k9.mail.Message;
 import com.fsck.k9.mail.MessagingException;
 import com.fsck.k9.mail.internet.BinaryTempFileBody;
+import com.fsck.k9.provider.UnreadWidgetProvider;
 import com.fsck.k9.service.BootReceiver;
 import com.fsck.k9.service.MailService;
 import com.fsck.k9.service.ShutdownReceiver;
 import com.fsck.k9.service.StorageGoneReceiver;
 
 public class K9 extends Application {
+    public static final int THEME_LIGHT = 0;
+    public static final int THEME_DARK = 1;
+
     /**
      * Components that are interested in knowing when the K9 instance is
      * available and ready (Android invokes Application.onCreate() after other
@@ -68,17 +72,12 @@ public class K9 extends Application {
      */
     private static List<ApplicationAware> observers = new ArrayList<ApplicationAware>();
 
-    /**
-     * @see K9#createAbsoluteSizeSpan(int)
-     */
-    private static Constructor<AbsoluteSizeSpan> sAbsoluteSizeSpanConstructor;
-
     public enum BACKGROUND_OPS {
         WHEN_CHECKED, ALWAYS, NEVER, WHEN_CHECKED_AUTO_SYNC
     }
 
     private static String language = "";
-    private static int theme = android.R.style.Theme_Light;
+    private static int theme = THEME_LIGHT;
 
     private static final FontSizes fontSizes = new FontSizes();
 
@@ -153,9 +152,20 @@ public class K9 extends Application {
     private static boolean mAnimations = true;
 
     private static boolean mConfirmDelete = false;
+    private static boolean mConfirmDeleteStarred = false;
     private static boolean mConfirmSpam = false;
     private static boolean mConfirmMarkAllAsRead = true;
-    private static boolean mKeyguardPrivacy = false;
+
+    private static NotificationHideSubject sNotificationHideSubject = NotificationHideSubject.NEVER;
+
+    /**
+     * Controls when to hide the subject in the notification area.
+     */
+    public enum NotificationHideSubject {
+        ALWAYS,
+        WHEN_LOCKED,
+        NEVER
+    }
 
     private static boolean mMessageListStars = true;
     private static boolean mMessageListCheckboxes = false;
@@ -168,6 +178,7 @@ public class K9 extends Application {
     private static int mContactNameColor = 0xff00008f;
     private static boolean mMessageViewFixedWidthFont = false;
     private static boolean mMessageViewReturnToList = false;
+    private static boolean mMessageViewShowNext = false;
 
     private static boolean mGesturesEnabled = true;
     private static boolean mUseVolumeKeysForNavigation = false;
@@ -185,10 +196,18 @@ public class K9 extends Application {
     private static boolean compactLayouts = false;
     private static String mAttachmentDefaultPath = "";
 
+    private static boolean mBatchButtonsMarkRead = true;
+    private static boolean mBatchButtonsDelete = true;
+    private static boolean mBatchButtonsArchive = false;
+    private static boolean mBatchButtonsMove = false;
+    private static boolean mBatchButtonsFlag = true;
+    private static boolean mBatchButtonsUnselect = true;
 
     private static boolean useGalleryBugWorkaround = false;
     private static boolean galleryBuggy;
 
+    private static SortType mSortType;
+    private static HashMap<SortType, Boolean> mSortAscending = new HashMap<SortType, Boolean>();
 
     /**
      * The MIME type(s) of attachments we're willing to view.
@@ -258,7 +277,7 @@ public class K9 extends Application {
 
     public static final int PUSH_WAKE_LOCK_TIMEOUT = 60000;
 
-    public static final int MAIL_SERVICE_WAKE_LOCK_TIMEOUT = 30000;
+    public static final int MAIL_SERVICE_WAKE_LOCK_TIMEOUT = 60000;
 
     public static final int BOOT_RECEIVER_WAKE_LOCK_TIMEOUT = 60000;
 
@@ -435,16 +454,28 @@ public class K9 extends Application {
         editor.putInt("registeredNameColor", mContactNameColor);
         editor.putBoolean("messageViewFixedWidthFont", mMessageViewFixedWidthFont);
         editor.putBoolean("messageViewReturnToList", mMessageViewReturnToList);
+        editor.putBoolean("messageViewShowNext", mMessageViewShowNext);
+
+        editor.putBoolean("batchButtonsMarkRead", mBatchButtonsMarkRead);
+        editor.putBoolean("batchButtonsDelete", mBatchButtonsDelete);
+        editor.putBoolean("batchButtonsArchive", mBatchButtonsArchive);
+        editor.putBoolean("batchButtonsMove", mBatchButtonsMove);
+        editor.putBoolean("batchButtonsFlag", mBatchButtonsFlag);
+        editor.putBoolean("batchButtonsUnselect", mBatchButtonsUnselect);
 
         editor.putString("language", language);
         editor.putInt("theme", theme);
         editor.putBoolean("useGalleryBugWorkaround", useGalleryBugWorkaround);
 
         editor.putBoolean("confirmDelete", mConfirmDelete);
+        editor.putBoolean("confirmDeleteStarred", mConfirmDeleteStarred);
         editor.putBoolean("confirmSpam", mConfirmSpam);
         editor.putBoolean("confirmMarkAllAsRead", mConfirmMarkAllAsRead);
 
-        editor.putBoolean("keyguardPrivacy", mKeyguardPrivacy);
+        editor.putString("sortTypeEnum", mSortType.name());
+        editor.putBoolean("sortAscending", mSortAscending.get(mSortType));
+
+        editor.putString("notificationHideSubject", sNotificationHideSubject.toString());
 
         editor.putBoolean("compactLayouts", compactLayouts);
         editor.putString("attachmentdefaultpath", mAttachmentDefaultPath);
@@ -457,62 +488,10 @@ public class K9 extends Application {
         super.onCreate();
         app = this;
 
-
         galleryBuggy = checkForBuggyGallery();
 
         Preferences prefs = Preferences.getPreferences(this);
-        SharedPreferences sprefs = prefs.getPreferences();
-        DEBUG = sprefs.getBoolean("enableDebugLogging", false);
-        DEBUG_SENSITIVE = sprefs.getBoolean("enableSensitiveLogging", false);
-        mAnimations = sprefs.getBoolean("animations", true);
-        mGesturesEnabled = sprefs.getBoolean("gesturesEnabled", true);
-        mUseVolumeKeysForNavigation = sprefs.getBoolean("useVolumeKeysForNavigation", false);
-        mUseVolumeKeysForListNavigation = sprefs.getBoolean("useVolumeKeysForListNavigation", false);
-        mManageBack = sprefs.getBoolean("manageBack", false);
-        mStartIntegratedInbox = sprefs.getBoolean("startIntegratedInbox", false);
-        mMeasureAccounts = sprefs.getBoolean("measureAccounts", true);
-        mCountSearchMessages = sprefs.getBoolean("countSearchMessages", true);
-        mHideSpecialAccounts = sprefs.getBoolean("hideSpecialAccounts", false);
-        mMessageListStars = sprefs.getBoolean("messageListStars", true);
-        mMessageListCheckboxes = sprefs.getBoolean("messageListCheckboxes", false);
-        mMessageListTouchable = sprefs.getBoolean("messageListTouchable", false);
-        mMessageListPreviewLines = sprefs.getInt("messageListPreviewLines", 2);
-
-        mMobileOptimizedLayout = sprefs.getBoolean("mobileOptimizedLayout", false);
-        mZoomControlsEnabled = sprefs.getBoolean("zoomControlsEnabled", false);
-
-        mQuietTimeEnabled = sprefs.getBoolean("quietTimeEnabled", false);
-        mQuietTimeStarts = sprefs.getString("quietTimeStarts", "21:00");
-        mQuietTimeEnds = sprefs.getString("quietTimeEnds", "7:00");
-
-        mShowCorrespondentNames = sprefs.getBoolean("showCorrespondentNames", true);
-        mShowContactName = sprefs.getBoolean("showContactName", false);
-        mChangeContactNameColor = sprefs.getBoolean("changeRegisteredNameColor", false);
-        mContactNameColor = sprefs.getInt("registeredNameColor", 0xff00008f);
-        mMessageViewFixedWidthFont = sprefs.getBoolean("messageViewFixedWidthFont", false);
-        mMessageViewReturnToList = sprefs.getBoolean("messageViewReturnToList", false);
-
-        useGalleryBugWorkaround = sprefs.getBoolean("useGalleryBugWorkaround", K9.isGalleryBuggy());
-
-        mConfirmDelete = sprefs.getBoolean("confirmDelete", false);
-        mConfirmSpam = sprefs.getBoolean("confirmSpam", false);
-        mConfirmMarkAllAsRead = sprefs.getBoolean("confirmMarkAllAsRead", true);
-
-
-        mKeyguardPrivacy = sprefs.getBoolean("keyguardPrivacy", false);
-
-        compactLayouts = sprefs.getBoolean("compactLayouts", false);
-        mAttachmentDefaultPath = sprefs.getString("attachmentdefaultpath",  Environment.getExternalStorageDirectory().toString());
-        fontSizes.load(sprefs);
-
-        try {
-            setBackgroundOps(BACKGROUND_OPS.valueOf(sprefs.getString("backgroundOperations", "WHEN_CHECKED")));
-        } catch (Exception e) {
-            setBackgroundOps(BACKGROUND_OPS.WHEN_CHECKED);
-        }
-
-        K9.setK9Language(sprefs.getString("language", ""));
-        K9.setK9Theme(sprefs.getInt("theme", android.R.style.Theme_Light));
+        loadPrefs(prefs);
 
         /*
          * We have to give MimeMessage a temp directory because File.createTempFile(String, String)
@@ -558,30 +537,140 @@ public class K9 extends Application {
                 }
             }
 
+            private void updateUnreadWidget() {
+                try {
+                    UnreadWidgetProvider.updateUnreadCount(K9.this);
+                } catch (Exception e) {
+                    if (K9.DEBUG) {
+                        Log.e(LOG_TAG, "Error while updating unread widget(s)", e);
+                    }
+                }
+            }
+
             @Override
             public void synchronizeMailboxRemovedMessage(Account account, String folder, Message message) {
                 broadcastIntent(K9.Intents.EmailReceived.ACTION_EMAIL_DELETED, account, folder, message);
+                updateUnreadWidget();
             }
 
             @Override
             public void messageDeleted(Account account, String folder, Message message) {
                 broadcastIntent(K9.Intents.EmailReceived.ACTION_EMAIL_DELETED, account, folder, message);
+                updateUnreadWidget();
             }
 
             @Override
             public void synchronizeMailboxNewMessage(Account account, String folder, Message message) {
                 broadcastIntent(K9.Intents.EmailReceived.ACTION_EMAIL_RECEIVED, account, folder, message);
+                updateUnreadWidget();
+            }
+
+            @Override
+            public void folderStatusChanged(Account account, String folderName,
+                    int unreadMessageCount) {
+                updateUnreadWidget();
             }
 
             @Override
             public void searchStats(final AccountStats stats) {
-                // let observers know a fetch occured
+                // let observers know a fetch occurred
                 K9.this.sendBroadcast(new Intent(K9.Intents.EmailReceived.ACTION_REFRESH_OBSERVER, null));
             }
 
         });
 
         notifyObservers();
+    }
+
+    public static void loadPrefs(Preferences prefs) {
+        SharedPreferences sprefs = prefs.getPreferences();
+        DEBUG = sprefs.getBoolean("enableDebugLogging", false);
+        DEBUG_SENSITIVE = sprefs.getBoolean("enableSensitiveLogging", false);
+        mAnimations = sprefs.getBoolean("animations", true);
+        mGesturesEnabled = sprefs.getBoolean("gesturesEnabled", false);
+        mUseVolumeKeysForNavigation = sprefs.getBoolean("useVolumeKeysForNavigation", false);
+        mUseVolumeKeysForListNavigation = sprefs.getBoolean("useVolumeKeysForListNavigation", false);
+        mManageBack = sprefs.getBoolean("manageBack", false);
+        mStartIntegratedInbox = sprefs.getBoolean("startIntegratedInbox", false);
+        mMeasureAccounts = sprefs.getBoolean("measureAccounts", true);
+        mCountSearchMessages = sprefs.getBoolean("countSearchMessages", true);
+        mHideSpecialAccounts = sprefs.getBoolean("hideSpecialAccounts", false);
+        mMessageListStars = sprefs.getBoolean("messageListStars", true);
+        mMessageListCheckboxes = sprefs.getBoolean("messageListCheckboxes", false);
+        mMessageListTouchable = sprefs.getBoolean("messageListTouchable", false);
+        mMessageListPreviewLines = sprefs.getInt("messageListPreviewLines", 2);
+
+        mMobileOptimizedLayout = sprefs.getBoolean("mobileOptimizedLayout", false);
+        mZoomControlsEnabled = sprefs.getBoolean("zoomControlsEnabled", true);
+
+        mQuietTimeEnabled = sprefs.getBoolean("quietTimeEnabled", false);
+        mQuietTimeStarts = sprefs.getString("quietTimeStarts", "21:00");
+        mQuietTimeEnds = sprefs.getString("quietTimeEnds", "7:00");
+
+        mShowCorrespondentNames = sprefs.getBoolean("showCorrespondentNames", true);
+        mShowContactName = sprefs.getBoolean("showContactName", false);
+        mChangeContactNameColor = sprefs.getBoolean("changeRegisteredNameColor", false);
+        mContactNameColor = sprefs.getInt("registeredNameColor", 0xff00008f);
+        mMessageViewFixedWidthFont = sprefs.getBoolean("messageViewFixedWidthFont", false);
+        mMessageViewReturnToList = sprefs.getBoolean("messageViewReturnToList", false);
+        mMessageViewShowNext = sprefs.getBoolean("messageViewShowNext", false);
+
+        mBatchButtonsMarkRead = sprefs.getBoolean("batchButtonsMarkRead", true);
+        mBatchButtonsDelete = sprefs.getBoolean("batchButtonsDelete", true);
+        mBatchButtonsArchive = sprefs.getBoolean("batchButtonsArchive", true);
+        mBatchButtonsMove = sprefs.getBoolean("batchButtonsMove", true);
+        mBatchButtonsFlag = sprefs.getBoolean("batchButtonsFlag", true);
+        mBatchButtonsUnselect = sprefs.getBoolean("batchButtonsUnselect", true);
+
+        useGalleryBugWorkaround = sprefs.getBoolean("useGalleryBugWorkaround", K9.isGalleryBuggy());
+
+        mConfirmDelete = sprefs.getBoolean("confirmDelete", false);
+        mConfirmDeleteStarred = sprefs.getBoolean("confirmDeleteStarred", false);
+        mConfirmSpam = sprefs.getBoolean("confirmSpam", false);
+        mConfirmMarkAllAsRead = sprefs.getBoolean("confirmMarkAllAsRead", true);
+
+        try {
+            String value = sprefs.getString("sortTypeEnum", Account.DEFAULT_SORT_TYPE.name());
+            mSortType = SortType.valueOf(value);
+        } catch (Exception e) {
+            mSortType = Account.DEFAULT_SORT_TYPE;
+        }
+
+        boolean sortAscending = sprefs.getBoolean("sortAscending", Account.DEFAULT_SORT_ASCENDING);
+        mSortAscending.put(mSortType, sortAscending);
+
+        String notificationHideSubject = sprefs.getString("notificationHideSubject", null);
+        if (notificationHideSubject == null) {
+            // If the "notificationHideSubject" setting couldn't be found, the app was probably
+            // updated. Look for the old "keyguardPrivacy" setting and map it to the new enum.
+            sNotificationHideSubject = (sprefs.getBoolean("keyguardPrivacy", false)) ?
+                    NotificationHideSubject.WHEN_LOCKED : NotificationHideSubject.NEVER;
+        } else {
+            sNotificationHideSubject = NotificationHideSubject.valueOf(notificationHideSubject);
+        }
+
+        compactLayouts = sprefs.getBoolean("compactLayouts", false);
+        mAttachmentDefaultPath = sprefs.getString("attachmentdefaultpath",  Environment.getExternalStorageDirectory().toString());
+        fontSizes.load(sprefs);
+
+        try {
+            setBackgroundOps(BACKGROUND_OPS.valueOf(sprefs.getString("backgroundOperations", "WHEN_CHECKED")));
+        } catch (Exception e) {
+            setBackgroundOps(BACKGROUND_OPS.WHEN_CHECKED);
+        }
+
+        K9.setK9Language(sprefs.getString("language", ""));
+
+        int theme = sprefs.getInt("theme", THEME_LIGHT);
+
+        // We used to save the resource ID of the theme. So convert that to the new format if
+        // necessary.
+        if (theme == THEME_DARK || theme == android.R.style.Theme) {
+            theme = THEME_DARK;
+        } else {
+            theme = THEME_LIGHT;
+        }
+        K9.setK9Theme(theme);
     }
 
     private void maybeSetupStrictMode() {
@@ -596,7 +685,7 @@ public class K9 extends Application {
 
         catch (Exception e) {
             // Discard , as it means we're not running on a device with strict mode
-            Log.v(K9.LOG_TAG, "Failed to turn on strict mode " + e);
+            Log.v(K9.LOG_TAG, "Failed to turn on strict mode", e);
         }
 
     }
@@ -638,6 +727,14 @@ public class K9 extends Application {
 
     public static void setK9Language(String nlanguage) {
         language = nlanguage;
+    }
+
+    public static int getK9ThemeResourceId(int theme) {
+        return (theme == THEME_LIGHT) ? R.style.Theme_K9_Light : R.style.Theme_K9_Dark;
+    }
+
+    public static int getK9ThemeResourceId() {
+        return getK9ThemeResourceId(theme);
     }
 
     public static int getK9Theme() {
@@ -875,6 +972,14 @@ public class K9 extends Application {
         mMessageViewReturnToList = messageViewReturnToList;
     }
 
+    public static boolean messageViewShowNext() {
+        return mMessageViewShowNext;
+    }
+
+    public static void setMessageViewShowNext(boolean messageViewShowNext) {
+        mMessageViewShowNext = messageViewShowNext;
+    }
+
     public static Method getMethod(Class<?> classObject, String methodName) {
         try {
             return classObject.getMethod(methodName, boolean.class);
@@ -936,6 +1041,14 @@ public class K9 extends Application {
         mConfirmDelete = confirm;
     }
 
+    public static boolean confirmDeleteStarred() {
+        return mConfirmDeleteStarred;
+    }
+
+    public static void setConfirmDeleteStarred(final boolean confirm) {
+        mConfirmDeleteStarred = confirm;
+    }
+
     public static boolean confirmSpam() {
         return mConfirmSpam;
     }
@@ -952,15 +1065,12 @@ public class K9 extends Application {
         mConfirmMarkAllAsRead = confirm;
     }
 
-    /**
-     * @return Whether privacy rules should be applied when system is locked
-     */
-    public static boolean keyguardPrivacy() {
-        return mKeyguardPrivacy;
+    public static NotificationHideSubject getNotificationHideSubject() {
+        return sNotificationHideSubject;
     }
 
-    public static void setKeyguardPrivacy(final boolean state) {
-        mKeyguardPrivacy = state;
+    public static void setNotificationHideSubject(final NotificationHideSubject mode) {
+        sNotificationHideSubject = mode;
     }
 
     public static boolean useCompactLayouts() {
@@ -969,6 +1079,48 @@ public class K9 extends Application {
 
     public static void setCompactLayouts(boolean compactLayouts) {
         K9.compactLayouts = compactLayouts;
+    }
+
+    public static boolean batchButtonsMarkRead() {
+        return mBatchButtonsMarkRead;
+    }
+    public static void setBatchButtonsMarkRead(final boolean state) {
+        mBatchButtonsMarkRead = state;
+    }
+
+    public static boolean batchButtonsDelete() {
+        return mBatchButtonsDelete;
+    }
+    public static void setBatchButtonsDelete(final boolean state) {
+        mBatchButtonsDelete = state;
+    }
+
+    public static boolean batchButtonsArchive() {
+        return mBatchButtonsArchive;
+    }
+    public static void setBatchButtonsArchive(final boolean state) {
+        mBatchButtonsArchive = state;
+    }
+
+    public static boolean batchButtonsMove() {
+        return mBatchButtonsMove;
+    }
+    public static void setBatchButtonsMove(final boolean state) {
+        mBatchButtonsMove = state;
+    }
+
+    public static boolean batchButtonsFlag() {
+        return mBatchButtonsFlag;
+    }
+    public static void setBatchButtonsFlag(final boolean state) {
+        mBatchButtonsFlag = state;
+    }
+
+    public static boolean batchButtonsUnselect() {
+        return mBatchButtonsUnselect;
+    }
+    public static void setBatchButtonsUnselect(final boolean state) {
+        mBatchButtonsUnselect = state;
     }
 
     /**
@@ -998,47 +1150,23 @@ public class K9 extends Application {
         K9.mAttachmentDefaultPath = attachmentDefaultPath;
     }
 
-    /**
-     * Creates an {@link AbsoluteSizeSpan} object.
-     *
-     * <p>
-     * Android versions prior to 2.0 don't support the constructor with two parameters
-     * ({@link AbsoluteSizeSpan#AbsoluteSizeSpan(int, boolean)}). So we have to perform some
-     * reflection magic to dynamically load the new constructor on devices that support it.
-     * For devices with old Android versions we just use the size as pixels (instead of dip).
-     * </p>
-     *
-     * @param size This is used as the {@code size} parameter for the AbsoluteSizeSpan constructor.
-     * @return a AbsoluteSizeSpan object with the specified text size.
-     */
-    public static AbsoluteSizeSpan createAbsoluteSizeSpan(int size) {
-        if (Integer.parseInt(android.os.Build.VERSION.SDK) < 5) {
-            // For Android 1.5/1.6 simply use the constructor with only the size parameter.
-            // Yes, that will most likely look wrong!
-            return new AbsoluteSizeSpan(size);
-        }
-
-        if (sAbsoluteSizeSpanConstructor == null) {
-            try {
-                sAbsoluteSizeSpanConstructor = AbsoluteSizeSpan.class.getConstructor(int.class, boolean.class);
-            } catch (Exception e) {
-                Log.e(K9.LOG_TAG, "Couldn't get the AbsoluteSizeSpan(int, boolean) constructor", e);
-
-                // Fallback
-                return new AbsoluteSizeSpan(size);
-            }
-        }
-
-        AbsoluteSizeSpan result;
-        try {
-            result = sAbsoluteSizeSpanConstructor.newInstance(size, true);
-        } catch (Exception e) {
-            Log.e(K9.LOG_TAG, "Couldn't call the AbsoluteSizeSpan(int, boolean) constructor", e);
-
-            // Fallback
-            result = new AbsoluteSizeSpan(size);
-        }
-
-        return result;
+    public static synchronized SortType getSortType() {
+        return mSortType;
     }
+
+    public static synchronized void setSortType(SortType sortType) {
+        mSortType = sortType;
+    }
+
+    public static synchronized boolean isSortAscending(SortType sortType) {
+        if (mSortAscending.get(sortType) == null) {
+            mSortAscending.put(sortType, sortType.isDefaultAscending());
+        }
+        return mSortAscending.get(sortType);
+    }
+
+    public static synchronized void setSortAscending(SortType sortType, boolean sortAscending) {
+        mSortAscending.put(sortType, sortAscending);
+    }
+
 }

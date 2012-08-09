@@ -1,10 +1,10 @@
 package com.fsck.k9.mail.store;
 
+import android.text.TextUtils;
 import com.fsck.k9.mail.MessagingException;
 import com.fsck.k9.mail.filter.FixedLengthInputStream;
 import com.fsck.k9.mail.filter.PeekableInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -44,10 +44,8 @@ public class ImapResponseParser {
                 parseUntaggedResponse();
                 readTokens(response);
             } else if (ch == '+') {
-                response.mCommandContinuationRequested =
-                    parseCommandContinuationRequest();
-                //TODO: Add special "resp-text" parsing
-                readTokens(response);
+                response.mCommandContinuationRequested = parseCommandContinuationRequest();
+                parseResponseText(response);
             } else {
                 response.mTag = parseTaggedResponse();
                 readTokens(response);
@@ -67,22 +65,69 @@ public class ImapResponseParser {
 
     private void readTokens(ImapResponse response) throws IOException {
         response.clear();
-        Object token;
-        while ((token = readToken(response)) != null) {
-            if (!(token instanceof ImapList)) {
-                response.add(token);
-            }
 
-            /*
-             * TODO: Check for responses ("OK", "PREAUTH", "BYE", "NO", "BAD")
-             * that can contain resp-text tokens. If found, hand over to a special
-             * method that parses a resp-text token. There's no need to use
-             * readToken()/parseToken() on that data.
-             *
-             * See RFC 3501, Section 9 Formal Syntax (resp-text)
-             */
+        String firstToken = (String) readToken(response);
+        response.add(firstToken);
+
+        if (isStatusResponse(firstToken)) {
+            parseResponseText(response);
+        } else {
+            Object token;
+            while ((token = readToken(response)) != null) {
+                if (!(token instanceof ImapList)) {
+                    response.add(token);
+                }
+            }
         }
-        response.mCompleted = true;
+    }
+
+    /**
+     * Parse {@code resp-text} tokens
+     *
+     * <p>
+     * Responses "OK", "PREAUTH", "BYE", "NO", "BAD", and continuation request responses can
+     * contain {@code resp-text} tokens. We parse the {@code resp-text-code} part as tokens and
+     * read the rest as sequence of characters to avoid the parser interpreting things like
+     * "{123}" as start of a literal.
+     * </p>
+     * <p>Example:</p>
+     * <p>
+     * {@code * OK [UIDVALIDITY 3857529045] UIDs valid}
+     * </p>
+     * <p>
+     * See RFC 3501, Section 9 Formal Syntax (resp-text)
+     * </p>
+     *
+     * @param parent
+     *         The {@link ImapResponse} instance that holds the parsed tokens of the response.
+     *
+     * @throws IOException
+     *          If there's a network error.
+     *
+     * @see #isStatusResponse(String)
+     */
+    private void parseResponseText(ImapResponse parent) throws IOException {
+        skipIfSpace();
+
+        int next = mIn.peek();
+        if (next == '[') {
+            parseSequence(parent);
+            skipIfSpace();
+        }
+
+        String rest = readStringUntil('\r');
+        expect('\n');
+
+        if (!TextUtils.isEmpty(rest)) {
+            // The rest is free-form text.
+            parent.add(rest);
+        }
+    }
+
+    private void skipIfSpace() throws IOException {
+        if (mIn.peek() == ' ') {
+            expect(' ');
+        }
     }
 
     /**
@@ -205,7 +250,7 @@ public class ImapResponseParser {
                        ch == '[' || ch == ']' ||
                        // docs claim that flags are \ atom but atom isn't supposed to
                        // contain
-                       // * and some falgs contain *
+                       // * and some flags contain *
                        // ch == '%' || ch == '*' ||
 //                    ch == '%' ||
                        // TODO probably should not allow \ and should recognize
@@ -281,7 +326,7 @@ public class ImapResponseParser {
     private String parseQuoted() throws IOException {
         expect('"');
 
-        StringBuffer sb = new StringBuffer();
+        StringBuilder sb = new StringBuilder();
         int ch;
         boolean escape = false;
         while ((ch = mIn.read()) != -1) {
@@ -299,7 +344,7 @@ public class ImapResponseParser {
     }
 
     private String readStringUntil(char end) throws IOException {
-        StringBuffer sb = new StringBuffer();
+        StringBuilder sb = new StringBuilder();
         int ch;
         while ((ch = mIn.read()) != -1) {
             if (ch == end) {
@@ -324,7 +369,7 @@ public class ImapResponseParser {
      * Represents an IMAP list response and is also the base class for the
      * ImapResponse.
      */
-    public class ImapList extends ArrayList<Object> {
+    public static class ImapList extends ArrayList<Object> {
         private static final long serialVersionUID = -4067248341419617583L;
 
         public ImapList getList(int index) {
@@ -339,10 +384,10 @@ public class ImapResponseParser {
             return (String)get(index);
         }
 
-        public InputStream getLiteral(int index) {
-            return (InputStream)get(index);
+        public long getLong(int index) {
+            return Long.parseLong(getString(index));
         }
-
+        
         public int getNumber(int index) {
             return Integer.parseInt(getString(index));
         }
@@ -368,7 +413,7 @@ public class ImapResponseParser {
 
 
         public Object getKeyedValue(Object key) {
-            for (int i = 0, count = size(); i < count; i++) {
+            for (int i = 0, count = size() - 1; i < count; i++) {
                 if (equalsIgnoreCase(get(i), key)) {
                     return get(i + 1);
                 }
@@ -384,10 +429,6 @@ public class ImapResponseParser {
             return (String)getKeyedValue(key);
         }
 
-        public InputStream getKeyedLiteral(Object key) {
-            return (InputStream)getKeyedValue(key);
-        }
-
         public int getKeyedNumber(Object key) {
             return Integer.parseInt(getKeyedString(key));
         }
@@ -397,7 +438,7 @@ public class ImapResponseParser {
                 return false;
             }
 
-            for (int i = 0, count = size(); i < count; i++) {
+            for (int i = 0, count = size() - 1; i < count; i++) {
                 if (equalsIgnoreCase(key, get(i))) {
                     return true;
                 }
@@ -406,7 +447,7 @@ public class ImapResponseParser {
         }
 
         public int getKeyIndex(Object key) {
-            for (int i = 0, count = size(); i < count; i++) {
+            for (int i = 0, count = size() - 1; i < count; i++) {
                 if (equalsIgnoreCase(key, get(i))) {
                     return i;
                 }
@@ -442,36 +483,26 @@ public class ImapResponseParser {
     }
 
     /**
-     * Represents a single response from the IMAP server. Tagged responses will
-     * have a non-null tag. Untagged responses will have a null tag. The object
-     * will contain all of the available tokens at the time the response is
-     * received. In general, it will either contain all of the tokens of the
-     * response or all of the tokens up until the first LITERAL. If the object
-     * does not contain the entire response the caller must call more() to
-     * continue reading the response until more returns false.
+     * Represents a single response from the IMAP server.
+     *
+     * <p>
+     * Tagged responses will have a non-null tag. Untagged responses will have a null tag. The
+     * object will contain all of the available tokens at the time the response is received.
+     * </p>
      */
     public class ImapResponse extends ImapList {
         /**
          *
          */
         private static final long serialVersionUID = 6886458551615975669L;
-        private boolean mCompleted;
         private IImapResponseCallback mCallback;
 
         boolean mCommandContinuationRequested;
         String mTag;
 
-        public boolean more() throws IOException {
-            if (mCompleted) {
-                return false;
-            }
-            readTokens(this);
-            return true;
-        }
-
         public String getAlertText() {
             if (size() > 1 && equalsIgnoreCase("[ALERT]", get(1))) {
-                StringBuffer sb = new StringBuffer();
+                StringBuilder sb = new StringBuilder();
                 for (int i = 2, count = size(); i < count; i++) {
                     sb.append(get(i).toString());
                     sb.append(' ');
@@ -486,6 +517,14 @@ public class ImapResponseParser {
         public String toString() {
             return "#" + (mCommandContinuationRequested ? "+" : mTag) + "# " + super.toString();
         }
+    }
+
+    public boolean isStatusResponse(String symbol) {
+        return symbol.equalsIgnoreCase("OK") ||
+               symbol.equalsIgnoreCase("NO") ||
+               symbol.equalsIgnoreCase("BAD") ||
+               symbol.equalsIgnoreCase("PREAUTH") ||
+               symbol.equalsIgnoreCase("BYE");
     }
 
     public static boolean equalsIgnoreCase(Object o1, Object o2) {

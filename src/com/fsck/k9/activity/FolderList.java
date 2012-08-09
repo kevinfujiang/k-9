@@ -3,12 +3,14 @@ package com.fsck.k9.activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.PowerManager;
-import android.util.Config;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.*;
@@ -21,6 +23,7 @@ import android.widget.AdapterView.OnItemClickListener;
 import com.fsck.k9.*;
 import com.fsck.k9.Account.FolderMode;
 import com.fsck.k9.activity.FolderInfoHolder;
+import com.fsck.k9.activity.FolderList.FolderListAdapter.FolderListFilter;
 import com.fsck.k9.activity.setup.Prefs;
 import com.fsck.k9.activity.setup.AccountSettings;
 import com.fsck.k9.activity.setup.FolderSettings;
@@ -47,8 +50,11 @@ import java.util.List;
  */
 
 public class FolderList extends K9ListActivity {
-
+    /*
+     * Constants for showDialog() etc.
+     */
     private static final int DIALOG_MARK_ALL_AS_READ = 1;
+    private static final int DIALOG_FIND_FOLDER = 2;
 
     private static final String EXTRA_ACCOUNT = "account";
 
@@ -243,7 +249,7 @@ public class FolderList extends K9ListActivity {
         mListView.setScrollBarStyle(View.SCROLLBARS_OUTSIDE_INSET);
         mListView.setLongClickable(true);
         mListView.setFastScrollEnabled(true);
-        mListView.setScrollingCacheEnabled(true);
+        mListView.setScrollingCacheEnabled(false);
         mListView.setOnItemClickListener(new OnItemClickListener() {
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                 onOpenFolder(((FolderInfoHolder)mAdapter.getItem(position)).name);
@@ -355,38 +361,18 @@ public class FolderList extends K9ListActivity {
 
     @Override
     public void onBackPressed() {
-        // This will be called either automatically for you on 2.0
-        // or later, or by the code above on earlier versions of the
-        // platform.
         if (K9.manageBack()) {
             onAccounts();
         } else {
-            // TODO - when we move to android 2.0, uncomment this instead.
-            // super.onBackPressed()
-            finish();
+            super.onBackPressed();
         }
     }
 
-    @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
         //Shortcuts that work no matter what is selected
-
-        if (
-            // TODO - when we move to android 2.0, uncomment this.
-            // android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.ECLAIR &&
-
-            keyCode == KeyEvent.KEYCODE_BACK
-            && event.getRepeatCount() == 0
-            && K9.manageBack()) {
-            // Take care of calling this method on earlier versions of
-            // the platform where it doesn't exist.
-            onBackPressed();
-            return true;
-        }
-
-
         switch (keyCode) {
         case KeyEvent.KEYCODE_Q:
-            //case KeyEvent.KEYCODE_BACK:
         {
             onAccounts();
             return true;
@@ -431,6 +417,7 @@ public class FolderList extends K9ListActivity {
         if (mAccount.getFolderPushMode() != FolderMode.NONE) {
             MailService.actionRestartPushers(this, null);
         }
+        mAdapter.getFilter().filter(null);
         onRefresh(false);
     }
 
@@ -439,6 +426,14 @@ public class FolderList extends K9ListActivity {
 
         MessagingController.getInstance(getApplication()).listFolders(mAccount, forceRemote, mAdapter.mListener);
 
+    }
+
+    /**
+     * Show an alert with an input-field for a filter-expression.
+     * Filter {@link #mAdapter} with the user-input.
+     */
+    private void onEnterFilter() {
+        showDialog(DIALOG_FIND_FOLDER);
     }
 
     private void onEditPrefs() {
@@ -520,6 +515,11 @@ public class FolderList extends K9ListActivity {
 
         case R.id.list_folders:
             onRefresh(REFRESH_REMOTE);
+
+            return true;
+
+        case R.id.filter_folders:
+            onEnterFilter();
 
             return true;
 
@@ -653,19 +653,59 @@ public class FolderList extends K9ListActivity {
     @Override
     public Dialog onCreateDialog(int id) {
         switch (id) {
-        case DIALOG_MARK_ALL_AS_READ:
-            return ConfirmationDialog.create(this, id,
-                                             R.string.mark_all_as_read_dlg_title,
-                                             getString(R.string.mark_all_as_read_dlg_instructions_fmt,
-                                                     mSelectedContextFolder.displayName),
-                                             R.string.okay_action,
-                                             R.string.cancel_action,
-            new Runnable() {
-                @Override
-                public void run() {
-                    markAllAsRead();
-                }
-            });
+            case DIALOG_MARK_ALL_AS_READ:
+                return ConfirmationDialog.create(this, id, R.string.mark_all_as_read_dlg_title,
+                        getString(R.string.mark_all_as_read_dlg_instructions_fmt,
+                            mSelectedContextFolder.displayName),
+                        R.string.okay_action, R.string.cancel_action,
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                markAllAsRead();
+                            }
+                        });
+            case DIALOG_FIND_FOLDER: {
+                AlertDialog.Builder builder = new AlertDialog.Builder(this);
+                builder.setTitle(R.string.filter_folders_action);
+
+                final EditText input = new EditText(this);
+                input.setId(R.id.filter_folders);
+                input.setHint(R.string.folder_list_filter_hint);
+                input.addTextChangedListener(new TextWatcher() {
+                    @Override
+                    public void onTextChanged(CharSequence s, int start, int before, int count) {
+                        mAdapter.getFilter().filter(input.getText());
+                    }
+
+                    @Override
+                    public void beforeTextChanged(CharSequence s, int start, int count,
+                            int after) { /* not used */ }
+
+                    @Override
+                    public void afterTextChanged(Editable s) { /* not used */ }
+                });
+
+                builder.setView(input);
+
+                builder.setPositiveButton(getString(R.string.okay_action),
+                        new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int whichButton) {
+                                String value = input.getText().toString();
+                                mAdapter.getFilter().filter(value);
+                            }
+                        });
+
+                builder.setNegativeButton(getString(R.string.cancel_action),
+                        new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int whichButton) {
+                                mAdapter.getFilter().filter(null);
+                            }
+                        });
+
+                return builder.create();
+            }
         }
 
         return super.onCreateDialog(id);
@@ -674,14 +714,27 @@ public class FolderList extends K9ListActivity {
     @Override
     public void onPrepareDialog(int id, Dialog dialog) {
         switch (id) {
-        case DIALOG_MARK_ALL_AS_READ:
-            ((AlertDialog)dialog).setMessage(getString(R.string.mark_all_as_read_dlg_instructions_fmt,
-                                             mSelectedContextFolder.displayName));
+            case DIALOG_MARK_ALL_AS_READ: {
+                AlertDialog alertDialog = (AlertDialog) dialog;
+                alertDialog.setMessage(getString(R.string.mark_all_as_read_dlg_instructions_fmt,
+                        mSelectedContextFolder.displayName));
+                break;
+            }
+            case DIALOG_FIND_FOLDER: {
+                AlertDialog alertDialog = (AlertDialog) dialog;
+                EditText input = (EditText) alertDialog.findViewById(R.id.filter_folders);
 
-            break;
+                // Populate the EditText with the current search term
+                FolderListFilter filter = (FolderListFilter) mAdapter.getFilter();
+                input.setText(filter.getSearchTerm());
 
-        default:
-            super.onPrepareDialog(id, dialog);
+                // Place the cursor at the end of the text
+                input.setSelection(input.getText().length());
+                break;
+            }
+            default: {
+                super.onPrepareDialog(id, dialog);
+            }
         }
     }
 
@@ -703,6 +756,15 @@ public class FolderList extends K9ListActivity {
             menu.findItem(R.id.send_messages).setVisible(false);
         }
         if (K9.ERROR_FOLDER_NAME.equals(folder.name)) {
+            menu.findItem(R.id.expunge).setVisible(false);
+        }
+
+        if (!MessagingController.getInstance(getApplication()).isMoveCapable(mAccount)) {
+            // FIXME: Really we want to do this for all local-only folders
+            if (!mAccount.getInboxFolderName().equals(folder.name)) {
+                menu.findItem(R.id.check_mail).setVisible(false);
+            }
+
             menu.findItem(R.id.expunge).setVisible(false);
         }
 
@@ -772,10 +834,6 @@ public class FolderList extends K9ListActivity {
                 if (account.equals(mAccount)) {
 
                     mHandler.progress(false);
-
-                    if (Config.LOGV) {
-                        Log.v(K9.LOG_TAG, "listFoldersFailed " + message);
-                    }
                 }
                 super.listFoldersFailed(account, message);
             }
@@ -889,6 +947,8 @@ public class FolderList extends K9ListActivity {
                         int unreadMessageCount = localFolder.getUnreadMessageCount();
                         FolderInfoHolder folderHolder = getFolder(folderName);
                         if (folderHolder != null) {
+                            int oldUnreadMessageCount = folderHolder.unreadMessageCount;
+                            mUnreadMessageCount += unreadMessageCount - oldUnreadMessageCount;
                             folderHolder.populate(context, localFolder, mAccount, unreadMessageCount);
                             mHandler.dataChanged();
                         }
@@ -959,6 +1019,7 @@ public class FolderList extends K9ListActivity {
             public void folderStatusChanged(Account account, String folderName, int unreadMessageCount) {
                 if (account.equals(mAccount)) {
                     refreshFolder(account, folderName);
+                    informUserOfStatus();
                 }
             }
 
@@ -1111,8 +1172,8 @@ public class FolderList extends K9ListActivity {
             holder.chip.setBackgroundDrawable(mAccount.generateColorChip().drawable());
             holder.chip.getBackground().setAlpha(folder.unreadMessageCount == 0 ? 127 : 255);
 
-            holder.folderName.setTextSize(TypedValue.COMPLEX_UNIT_DIP, mFontSizes.getFolderName());
-            holder.folderStatus.setTextSize(TypedValue.COMPLEX_UNIT_DIP, mFontSizes.getFolderStatus());
+            holder.folderName.setTextSize(TypedValue.COMPLEX_UNIT_SP, mFontSizes.getFolderName());
+            holder.folderStatus.setTextSize(TypedValue.COMPLEX_UNIT_SP, mFontSizes.getFolderStatus());
 
 
             return view;
@@ -1142,6 +1203,11 @@ public class FolderList extends K9ListActivity {
          * @author Marcus@Wolschon.biz
          */
         public class FolderListFilter extends Filter {
+            private CharSequence mSearchTerm;
+
+            public CharSequence getSearchTerm() {
+                return mSearchTerm;
+            }
 
             /**
              * Do the actual search.
@@ -1151,6 +1217,7 @@ public class FolderList extends K9ListActivity {
              */
             @Override
             protected FilterResults performFiltering(CharSequence searchTerm) {
+                mSearchTerm = searchTerm;
                 FilterResults results = new FilterResults();
 
                 if ((searchTerm == null) || (searchTerm.length() == 0)) {

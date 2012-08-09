@@ -27,17 +27,14 @@ public class RemoteControlService extends CoreService {
         //  Intent i = new Intent();
         i.setClass(context, RemoteControlService.class);
         i.setAction(RemoteControlService.SET_ACTION);
-        addWakeLockId(i, wakeLockId);
-        if (wakeLockId == null) {
-            addWakeLock(context, i);
-        }
+        addWakeLockId(context, i, wakeLockId, true);
         context.startService(i);
     }
 
     public static final int REMOTE_CONTROL_SERVICE_WAKE_LOCK_TIMEOUT = 20000;
 
     @Override
-    public void startService(final Intent intent, final int startId) {
+    public int startService(final Intent intent, final int startId) {
         if (K9.DEBUG)
             Log.i(K9.LOG_TAG, "RemoteControlService started with startId = " + startId);
         final Preferences preferences = Preferences.getPreferences(this);
@@ -126,7 +123,7 @@ public class RemoteControlService extends CoreService {
 
                         String theme = intent.getStringExtra(K9_THEME);
                         if (theme != null) {
-                            K9.setK9Theme(K9RemoteControl.K9_THEME_DARK.equals(theme) ? android.R.style.Theme : android.R.style.Theme_Light);
+                            K9.setK9Theme(K9RemoteControl.K9_THEME_DARK.equals(theme) ? K9.THEME_DARK : K9.THEME_LIGHT);
                         }
 
                         SharedPreferences sPrefs = preferences.getPreferences();
@@ -158,6 +155,8 @@ public class RemoteControlService extends CoreService {
             }
             , RemoteControlService.REMOTE_CONTROL_SERVICE_WAKE_LOCK_TIMEOUT, startId);
         }
+
+        return START_NOT_STICKY;
     }
 
 }
